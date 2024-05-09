@@ -4,9 +4,8 @@ import os
 import optparse
 from hashlib import md5
 import brotli
+import datetime
 
-# file compress level(0-11)
-compress_level = 11
 # 4GB maximum
 length_count = 4
 # encoding
@@ -15,7 +14,7 @@ encoding = 'utf-8'
 # output: {path: (compressed_data, file_md5)}
 
 
-def generate_md5_table(folder: str) -> dict:
+def generate_md5_table(folder: str, level) -> dict:
     res: dict = dict()
     curdir = os.curdir
     os.chdir(folder)
@@ -24,11 +23,11 @@ def generate_md5_table(folder: str) -> dict:
         for f in files:
             md5_generator = md5()
             full_path = os.path.join(root, f)
-            print(f"processing {full_path}...")
+            print(f"Processing {full_path}...")
             f = open(full_path, "rb")
             content = f.read()
             content_compressed = brotli.compress(
-                content, quality=compress_level)
+                content, quality=level)
             md5_generator.update(content)
             md5_code = md5_generator.hexdigest().encode(encoding=encoding)
             res[full_path] = (content_compressed, md5_code)
@@ -36,7 +35,7 @@ def generate_md5_table(folder: str) -> dict:
     return res
 
 
-def write_metadata(md5_table: dict, output_folder: str, exe: str):
+def write_package_metadata(md5_table: dict, output_folder: str, exe: str):
     output_path = os.path.join(output_folder, "data.bin")
     with open(output_path, "wb") as f:
         f.write("rustdesk".encode(encoding=encoding))
@@ -57,8 +56,13 @@ def write_metadata(md5_table: dict, output_folder: str, exe: str):
         f.write("rustdesk".encode(encoding=encoding))
         # executable
         f.write(exe.encode(encoding='utf-8'))
-    print(f"metadata had written to {output_path}")
+    print(f"Metadata has been written to {output_path}")
 
+def write_app_metadata(output_folder: str):
+    output_path = os.path.join(output_folder, "app_metadata.toml")
+    with open(output_path, "w") as f:
+        f.write(f"timestamp = {int(datetime.datetime.now().timestamp() * 1000)}\n")
+    print(f"App metadata has been written to {output_path}")
 
 def build_portable(output_folder: str, target: str):
     os.chdir(output_folder)
@@ -81,6 +85,8 @@ if __name__ == '__main__':
                       help="specify startup file in --folder, default is rustdesk.exe")
     parser.add_option("-t", "--target", dest="target",
                       help="the target used by cargo")
+    parser.add_option("-l", "--level", dest="level", type="int",
+                      help="compression level, default is 11, highest", default=11)
     (options, args) = parser.parse_args()
     folder = options.folder or './rustdesk'
     output_folder = os.path.abspath(options.output_folder or './')
@@ -91,10 +97,12 @@ if __name__ == '__main__':
         options.executable = folder + '/' + options.executable
     exe: str = os.path.abspath(options.executable)
     if not exe.startswith(os.path.abspath(folder)):
-        print("the executable must locate in source folder")
+        print("The executable must locate in source folder")
         exit(-1)
     exe = '.' + exe[len(os.path.abspath(folder)):]
-    print("executable path: " + exe)
-    md5_table = generate_md5_table(folder)
-    write_metadata(md5_table, output_folder, exe)
+    print("Executable path: " + exe)
+    print("Compression level: " + str(options.level))
+    md5_table = generate_md5_table(folder, options.level)
+    write_package_metadata(md5_table, output_folder, exe)
+    write_app_metadata(output_folder)
     build_portable(output_folder, options.target)
