@@ -4,6 +4,7 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/common/widgets/dialog.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
@@ -61,12 +62,21 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
     String? connToken,
   }) {
     final tabKey = '${peerId}_$terminalId';
+    final alias = bind.mainGetPeerOptionSync(id: peerId, key: 'alias');
+    final tabLabel =
+        alias.isNotEmpty ? '$alias #$terminalId' : '$peerId #$terminalId';
     return TabInfo(
       key: tabKey,
-      label: '$peerId #$terminalId',
+      label: tabLabel,
       selectedIcon: selectedIcon,
       unselectedIcon: unselectedIcon,
       onTabCloseButton: () async {
+        if (await desktopTryShowTabAuditDialogCloseCancelled(
+          id: tabKey,
+          tabController: tabController,
+        )) {
+          return;
+        }
         // Close the terminal session first
         final ffi = TerminalConnectionManager.getExistingConnection(peerId);
         if (ffi != null) {
@@ -124,7 +134,7 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
       },
       setter: (bool v) async {
         final ffi = Get.find<FFI>(tag: 'terminal_$peerId');
-        bind.sessionToggleOption(
+        await bind.sessionToggleOption(
           sessionId: ffi.sessionId,
           value: kOptionTerminalPersistent,
         );
@@ -177,6 +187,18 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
         tabController.clear();
       } else if (call.method == kWindowActionRebuild) {
         reloadCurrentWindow();
+      } else if (call.method == kWindowEventActiveSession) {
+        if (tabController.state.value.tabs.isEmpty) {
+          return false;
+        }
+        final currentTab = tabController.state.value.selectedTabInfo;
+        assert(call.arguments is String,
+            "Expected String arguments for kWindowEventActiveSession, got ${call.arguments.runtimeType}");
+        if (currentTab.key.startsWith(call.arguments)) {
+          windowOnTop(windowId());
+          return true;
+        }
+        return false;
       }
     });
     Future.delayed(Duration.zero, () {
@@ -395,6 +417,14 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
 
   Future<bool> handleWindowCloseButton() async {
     final connLength = tabController.state.value.tabs.length;
+    if (connLength == 1) {
+      if (await desktopTryShowTabAuditDialogCloseCancelled(
+        id: tabController.state.value.tabs[0].key,
+        tabController: tabController,
+      )) {
+        return false;
+      }
+    }
     if (connLength <= 1) {
       tabController.clear();
       return true;
